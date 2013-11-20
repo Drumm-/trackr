@@ -3,72 +3,112 @@ package main
 import (
         "fmt"
         "time"
-        "flag"
         "encoding/json"
         "io/ioutil"
+        "net/http"
        )
 
 type Project struct {
     Name string
     Time time.Duration
 }
+var projects []Project
 
-func main(){
-    var create = flag.Bool("create", false, "Create a new project")
-    var log = flag.Bool("log", false, "Log time to project")
-    var list = flag.Bool("list", false, "List projects")
-    var project_name = flag.String("name", "", "Project name")
-    var duration = flag.Duration("time", time.Duration(0), "Time to log")
-    flag.Parse()
+func saveProjects(){
+    b, _ := json.Marshal(projects)
+    ioutil.WriteFile("projects.json", b, 0644)
+}
 
-    projects := make([]Project, 0)
+type Message struct {
+    State string
+    Msg string
+}
 
-    b,_ := ioutil.ReadFile("projects.json")
+func jsonMessage(state string, msg string) ([]byte){
+    message := Message{state, msg}
+    b, _ := json.Marshal(message)
+    return b
+}
 
-    json.Unmarshal(b, &projects)
+func listHandler(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    b, err := json.Marshal(projects)
+    if err != nil {
+        fmt.Fprintf(w, "{}")
+    }
+    fmt.Fprintf(w, "%s", b)
+}
 
+func logHandler(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    project_name := r.FormValue("name")
+    duration_string := r.FormValue("duration")
+    var duration time.Duration
+    duration, err := time.ParseDuration(duration_string)
 
-    if ( *create == true ){
-        if ( len(*project_name) == 0){
-            fmt.Printf("Missing -name parameter\n")
-            return
-        }
-        fmt.Printf("Creating project %s\n", *project_name)
-        p := Project{*project_name, *duration}
-        projects = append(projects, p)
-    } else if ( *log == true ){
-        fmt.Printf("Logging time to %s\n", *project_name)
-        if ( len(*project_name) == 0){
-            fmt.Printf("Missing -name parameter\n")
-            return
-        }
-
-        var project Project
-        var key int = -1
-
-        for i, curr_project := range projects{
-            if (*project_name == curr_project.Name){
-                key = i
-                project = curr_project
-                break
-            }
-        }
-
-        if (key < 0){
-            fmt.Printf("Invalid project name")
-        }
-
-        projects[key] = Project{project.Name, project.Time+*duration}
-
-    } else if ( *list == true ) {
-        for _, project := range projects{
-            fmt.Printf("%s - %s\n", project.Name, project.Time)
-        }
-    } else {
-        fmt.Printf("No action specified\n")
+    if err != nil {
+        w.Write(jsonMessage("fail", "Invalid duration"))
+        return
     }
 
-    b, _ = json.Marshal(projects)
-    ioutil.WriteFile("projects.json", b, 0644)
+    if len(project_name) == 0 {
+        w.Write(jsonMessage("fail", "Missing name parameter"))
+        return
+    }
 
+    var project Project
+    var key int = -1
+
+    for i, curr_project := range projects{
+        if project_name == curr_project.Name {
+            key = i
+            project = curr_project
+            break
+        }
+    }
+
+    if (key < 0){
+        w.Write(jsonMessage("fail", "Invalid project name"))
+    }
+
+    projects[key] = Project{project.Name, project.Time+duration}
+    saveProjects()
+    w.Write(jsonMessage("success", "Successfully logged to project"))
+}
+
+func createHandler(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    project_name := r.FormValue("name")
+    duration_string := r.FormValue("duration")
+    var duration time.Duration
+    duration, err := time.ParseDuration(duration_string)
+
+    if err != nil {
+        duration = time.Duration(0)
+    }
+
+    if len(project_name) == 0 {
+        w.Write(jsonMessage("fail", "Missing name parameter"))
+        return
+    }
+
+    p := Project{project_name, duration}
+    projects = append(projects, p)
+    saveProjects()
+    w.Write(jsonMessage("success", "Created new project"))
+}
+
+func main(){
+    projects = make([]Project, 0)
+    b,_ := ioutil.ReadFile("projects.json")
+    err := json.Unmarshal(b, &projects)
+
+    if err != nil {
+        panic(err)
+    }
+
+    http.HandleFunc("/log.json", logHandler)
+    http.HandleFunc("/list.json", listHandler)
+    http.HandleFunc("/create.json", createHandler)
+    http.ListenAndServe(":8080", nil)
 }
