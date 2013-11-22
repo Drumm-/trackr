@@ -100,8 +100,12 @@ func createHandler(w http.ResponseWriter, r *http.Request) {
 
 func main(){
     projects = make([]Project, 0)
-    b,_ := ioutil.ReadFile("projects.json")
-    err := json.Unmarshal(b, &projects)
+    b, err := ioutil.ReadFile("projects.json")
+
+    if err != nil {
+        b, _ = json.Marshal(projects)
+    }
+    err = json.Unmarshal(b, &projects)
 
     if err != nil {
         panic(err)
